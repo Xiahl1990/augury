@@ -1,46 +1,64 @@
-import {Component, ElementRef, Inject, NgZone, Input} from '@angular/core';
-import {NgIf, NgClass} from '@angular/common';
-import * as Rx from 'rxjs';
-import {ComponentDataStore}
-  from '../../stores/component-data/component-data-store';
-import {UserActions} from '../../actions/user-actions/user-actions';
-import {UserActionType} from '../../actions/action-constants';
+import {
+  Component,
+  EventEmitter,
+  Input,
+  Output,
+} from '@angular/core';
 
-import TabMenu from '../tab-menu/tab-menu';
-import ComponentInfo from '../component-info/component-info';
-import InjectorTree from '../injector-tree/injector-tree';
+import {ComponentLoadState} from '../../state';
+import {StateTab} from '../../state';
+import {UserActions} from '../../actions/user-actions/user-actions';
+import {
+  InstanceValue,
+  Metadata,
+  Node,
+  PropertyMetadata,
+} from '../../../tree';
 
 @Component({
   selector: 'bt-info-panel',
-  templateUrl: '/src/frontend/components/info-panel/info-panel.html',
-  directives: [NgIf, TabMenu, ComponentInfo, InjectorTree]
+  template: require('./info-panel.html'),
 })
 export class InfoPanel {
+  @Input() tree;
+  @Input() node;
+  @Input() instanceValue: InstanceValue;
+  @Input() loadingState: ComponentLoadState;
 
-  @Input() tree: any;
-  @Input() node: any;
-  @Input() theme: string;
+  @Output() private selectNode = new EventEmitter<Node>();
 
-  private selectedTabIndex: number = 0;
+  private StateTab = StateTab;
+
+  private selectedTab = StateTab.Properties;
+
   private tabs = [{
       title: 'Properties',
-      selected: false
+      selected: false,
+      tab: StateTab.Properties,
     }, {
       title: 'Injector Graph',
-      selected: false
+      selected: false,
+      tab: StateTab.InjectorGraph,
     }];
 
-  constructor(
-    private componentDataStore: ComponentDataStore,
-    private userActions: UserActions
-  ) {}
+  constructor(private userActions: UserActions) {}
 
-  tabChange(index: number): void {
-    this.selectedTabIndex = index;
+  private get state() {
+    if (this.instanceValue) {
+      return this.instanceValue.instance;
+    }
+    return null;
   }
 
-  selectNode(node: any): void {
-    this.userActions.selectNode({ node: node });
+  private get metadata(): Metadata {
+    if (this.instanceValue) {
+      return this.instanceValue.metadata;
+    }
+
+    return new Map<string, PropertyMetadata>();
   }
 
+  private onSelectedTabChanged(tab: StateTab) {
+    this.selectedTab = tab;
+  }
 }

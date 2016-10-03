@@ -1,29 +1,43 @@
-import {Component, EventEmitter, OnChanges, Input} from '@angular/core';
+import {
+  Component,
+  EventEmitter,
+  Input,
+  Output,
+} from '@angular/core';
+
+export interface TabDescription {
+  title: string;
+  selected: boolean;
+  tab;
+}
 
 @Component({
   selector: 'bt-tab-menu',
-  templateUrl: '/src/frontend/components/tab-menu/tab-menu.html',
-  inputs: ['selectedTabIndex'],
-  outputs: ['tabChange']
+  template: require('./tab-menu.html'),
 })
-export default class TabMenu {
-  @Input() tabs: any;
-  private selectedTabIndex: number = 0;
-  private tabChange: EventEmitter<number> = new EventEmitter<number>();
+export class TabMenu {
+  @Input() tabs: Array<TabDescription>;
+  @Input() selectedTab;
+  @Input() showLogo: boolean = false;
 
-  ngOnChanges(changes): void {
-    this.tabClick(this.selectedTabIndex);
+  @Output() tabChange: EventEmitter<any> = new EventEmitter<any>();
+
+  private ngOnInit() {
+    const t = this.tabs.filter(tab => tab.tab === this.selectedTab);
+    if (t.length > 0) {
+      this.onSelect(t[0]);
+    }
   }
 
-  tabClick(index: number) {
+  private onSelect(tab: TabDescription) {
     this.tabs.forEach((t) => {
       t.selected = false;
     });
 
-    this.tabs[index].selected = true;
+    tab.selected = true;
 
     const selected = this.tabs.filter((t) => t.selected);
-    this.tabChange.emit(index);
-  }
 
+    this.tabChange.emit(tab.tab);
+  }
 }

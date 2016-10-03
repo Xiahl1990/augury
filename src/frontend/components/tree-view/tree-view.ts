@@ -1,21 +1,55 @@
-import {Component, Inject, NgZone, ElementRef} from '@angular/core';
-import {NgFor} from '@angular/common';
-import {NodeItem} from '../node-item/node-item';
+import {
+  Component,
+  EventEmitter,
+  Input,
+  Output,
+  ViewChild,
+} from '@angular/core';
+
+import {
+  MutableTree,
+  Node,
+} from '../../../tree';
+
 import {UserActions} from '../../actions/user-actions/user-actions';
-import {ComponentDataStore}
-  from '../../stores/component-data/component-data-store';
-import {UserActionType}
-  from '../../actions/action-constants';
-import {ComponentTree} from '../component-tree/component-tree';
+import {Search} from '../search/search';
 
 @Component({
   selector: 'bt-tree-view',
-  inputs: ['tree', 'changedNodes', 'selectedNode', 'closedNodes'],
-  templateUrl: 'src/frontend/components/tree-view/tree-view.html',
-  directives: [NgFor, NodeItem, ComponentTree]
+  template: require('./tree-view.html'),
 })
-/**
- * The Tree View
- * Displays the components' hierarchy
- */
-export class TreeView {}
+export class TreeView {
+  @Input() private selectedNode: Node;
+  @Input() private tree: MutableTree;
+
+  @Output() private collapseChildren = new EventEmitter<Node>();
+  @Output() private expandChildren = new EventEmitter<Node>();
+  @Output() private inspectElement = new EventEmitter<Node>();
+  @Output() private selectNode = new EventEmitter<Node>();
+
+  @ViewChild(Search) private search: Search;
+
+  private searchNode: Node;
+
+  constructor(private userActions: UserActions) {}
+
+  ngOnChanges(changes) {
+    if (this.search === null) {
+      return;
+    }
+
+    if (changes.hasOwnProperty('selectedNode') && this.selectedNode !== this.searchNode) {
+      this.searchNode = null;
+      this.search.reset();
+    }
+  }
+
+  private onRetrieveSearchResults = (query: string): Promise<Array<any>> => {
+    return this.userActions.searchComponents(this.tree, query);
+  }
+
+  private onSelectedSearchResultChanged(node: Node) {
+    this.searchNode = node;
+    this.selectNode.emit(node);
+  }
+}

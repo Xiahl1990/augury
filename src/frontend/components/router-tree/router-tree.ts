@@ -1,46 +1,60 @@
-import {Component, ViewEncapsulation, OnChanges, Inject,
-  ElementRef, Input} from '@angular/core';
-import RouterInfo from '../router-info/router-info';
+import {
+  Component,
+  Input,
+  ViewChild,
+} from '@angular/core';
+
+import {Route} from '../../../backend/utils';
+import {UserActions} from '../../actions/user-actions/user-actions';
+
 import * as d3 from 'd3';
+
+interface TreeConfig {
+  tree: d3.layout.Tree<d3.layout.tree.Node>;
+  diagonal:
+    d3.svg.Diagonal<
+      d3.svg.diagonal.Link<d3.svg.diagonal.Node>,
+      d3.svg.diagonal.Node
+    >;
+  svg: d3.Selection<any>;
+  g: d3.Selection<any>;
+}
 
 @Component({
   selector: 'bt-router-tree',
-  templateUrl: '/src/frontend/components/router-tree/router-tree.html',
-  directives: [RouterInfo]
+  template: require('./router-tree.html'),
+  styles: [require('to-string!./router-tree.css')],
 })
-
 export class RouterTree {
+  @ViewChild('chartContainer') chartContainer;
+  @Input() private routerTree: Array<Route>;
+  private selectedRoute: Route | any;
 
-  @Input() routerTree: Array<any>;
-  @Input() theme: string;
-  treeConfig: any;
-  selectedNode: any;
+  private treeConfig: TreeConfig;
 
-  constructor(@Inject(ElementRef) elementRef: ElementRef) {
+  constructor(private userActions: UserActions) {}
 
+  ngAfterViewInit() {
+    this.treeConfig = this.getTree();
+  }
+
+  private getTree(): TreeConfig {
     const tree = d3.layout.tree();
 
     const diagonal = d3.svg.diagonal()
       .projection((d) => [d.y, d.x]);
 
-    const svg = d3.select(elementRef.nativeElement)
-      .append('svg')
-      .attr('height', 500)
-      .attr('width', 1000)
-      .append('g')
-      .attr('transform', 'translate(100, 200)');
+    const svg = d3.select(this.chartContainer.nativeElement)
+      .append('svg');
 
-    this.treeConfig = {
+    const g = svg.append('g');
+
+    return {
       tree,
       diagonal,
       svg,
-      duration: 500
+      g
     };
-
-  }
-
-  ngOnChanges() {
-    this.render();
   }
 
   render() {
@@ -50,11 +64,18 @@ export class RouterTree {
 
     const tree = this.treeConfig.tree;
     const data = this.routerTree;
+    const gEl = document.getElementsByTagName('g')[0];
     let i = 0;
 
     // Compute the new tree layout.
     tree.nodeSize([20, 10]);
-    const nodes = tree.nodes(data).reverse();
+
+    let nodes = [];
+    for (const root of data) {
+      nodes = nodes.concat(tree.nodes(root));
+    }
+    nodes.reverse();
+
     const links = tree.links(nodes);
 
     // Normalize for fixed-depth.
@@ -63,70 +84,72 @@ export class RouterTree {
     });
 
     // Declare the nodes
-    const node = this.treeConfig.svg.selectAll('g.node')
-      .data(nodes, (d) => d.id || (d.id = ++i));
+    const node = this.treeConfig.g.selectAll('g.node')
+      .data(nodes, (d: any) => d.id || (d.id = ++i));
 
     // Enter the nodes
     const nodeEnter = node.enter().append('g')
       .attr('class', 'node')
-      .on('mouseover', this.rollover.bind(this))
-      .on('mouseout', this.rollover.bind(this));
+      .on('mouseover', n => this.onRollover(n))
+      .on('mouseout', n => this.onRollover(n));
 
     nodeEnter.append('circle')
       .attr('class', (d) => d.isAux ? 'node-aux-route' : 'node-route')
       .attr('r', 6);
 
-    const fillColor: string = this.theme === 'dark' ? '#A5A5A5' : '#000000';
     nodeEnter.append('text')
       .attr('x', (d) => d.children || d._children ? -13 : 13)
       .attr('dy', '.35em')
       .attr('text-anchor', (d) => d.children || d._children ? 'end' : 'start')
       .text((d) => d.name)
-      .attr('fill', fillColor)
-      .style('fill-opacity', 1);
+      .attr('class', 'monospace');
 
     // Update the nodes
-    const nodeUpdate = node.transition()
-      .attr('transform', (d) => `translate(${d.y},${d.x})`);
-
-    nodeUpdate.select('circle')
-      .style('fill', (d) => {
-        if (this.selectedNode && (d.id === this.selectedNode.id)) {
-          return d.isAux ? '#2828AB' : '#F05057';
-        }
-        return d.isAux ? '#EBF2FC' : '#FFF0F0';
-      });
-
-    nodeUpdate.select('text')
-      .attr('fill', fillColor)
-      .attr('class', 'monospace')
-      .style('fill-opacity', 1);
+    node.attr('transform', (d) => `translate(${d.y},${d.x})`)
+      .select('circle')
+      .classed('selected', (d) => this.selectedRoute && ( d.id === this.selectedRoute.id ));
 
     // Declare the links
-    const link = this.treeConfig.svg.selectAll('path.link')
-      .data(links, (d) => d.target.id);
+    const link = this.treeConfig.g.selectAll('path.link')
+      .data(links, (d: any) => d.target.id);
 
     // Enter any new links at the parent's previous position.
     link
       .enter()
       .insert('path', 'g')
-      .attr('style', 'stroke: #9B9B9B; stroke-width: 1px; fill: none;')
-      .attr('class', 'link');
-
-    // Transition links to their new position.
-    link.transition()
-      .duration(this.treeConfig.duration)
+      .attr('class', 'link')
       .attr('d', this.treeConfig.diagonal);
 
+    const gElBBox = gEl.getBBox();
+    const svgPadding = 20;
+
+    this.treeConfig.svg
+      .attr('height', gElBBox.height + 2 * svgPadding)
+      .attr('width', gElBBox.width + 2 * svgPadding);
+
+    this.treeConfig.g
+      .attr('transform', `translate(${ -gElBBox.x + svgPadding },${ -gElBBox.y + svgPadding})`);
   }
 
-  rollover(d) {
-    if (this.selectedNode) {
-      this.selectedNode = null;
+  private ngOnChanges() {
+    this.render();
+  }
+
+  private onRollover(route) {
+    if (this.selectedRoute) {
+      this.selectedRoute = null;
     } else {
-      this.selectedNode = d;
+      this.selectedRoute = route;
     }
     this.render();
   }
 
+  private onRetrieveSearchResults = (query: string): Promise<Array<any>> => {
+    return this.userActions.searchRouter(this.routerTree, query);
+  }
+
+  private onSelectedSearchResultChanged(route: Route) {
+    this.selectedRoute = route;
+    this.render();
+  }
 }

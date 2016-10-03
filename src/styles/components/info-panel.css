@@ -1,24 +1,11 @@
 
 /* Info Panel */
 
-.changed {
-  background-color: var(--bt-change-highlight-color);
-}
-
-.info-value {
-  color: var(--bt-type-color);
-}
-
-.info-key {
-  color: var(--bt-key-color);
-}
-
-.info-editable {
-  background-color: var(--bt-editable-highlight-color);
-  border-bottom: dashed blue 1px !important;
+.editable {
+  border-bottom: dashed 1px !important;
   border: 0;
-  color: var(--bt-editable-color);
   display: inline-block;
+  padding: 0 5px;
 
   &:focus {
     border-bottom: 0 !important;

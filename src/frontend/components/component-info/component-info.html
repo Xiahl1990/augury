@@ -1,54 +1,56 @@
-<div class="flex flex-column flex-auto overflow-scroll">
-  <div class="bg-darken-1 bg-panel border-bottom py3 px3 m0 ">
+<div class="flex flex-column flex-auto overflow-auto">
+  <div class="bg-darken-1 bg-panel border-bottom py3 px3 m0">
     <h4 class="primary-color col pt1 pb2 m0">
-      {{ node && node.name || 'No Component Selected' }}
+      {{ node && node.name || 'No component selected' }}
       &nbsp;
-      <a href=""
-        class="red-1 node-item-property"
+      <a href="#"
+        class="red-1 node-item-property no-highlight"
         *ngIf="node && node.name && node.isComponent"
-        (click)="viewComponentSource($event)">
+        (click)="viewComponentSource()">
         (View Source)
         </a>
     </h4>
-    <span class="h4 regular right primary-color"
+    <span class="h4 regular right primary-color no-highlight"
       *ngIf="node">
       ($a in Console)
     </span>
   </div>
 
+  <div
+     *ngIf="node && node.changeDetection"
+     class="section-title bg-darken-1 bg-panel primary-color pointer border-bottom py2 px3">
+    <span class="info-key">Change Detection: </span>{{node.changeDetection}}
+  </div>
+
   <div [hidden]="!(node && node.name)">
-    <accordion [sectionTitle]='"Properties"'>
-      <section-content>
+    <accordion sectionTitle="Properties" *ngIf="hasProperties" [defaultExpanded]="true">
+      <div section-content>
         <ul class="list-reset m0"
           *ngIf="node && node.description">
-          <bt-property-value 
+          <bt-property-value
             *ngFor="let property of node.description"
-            [checkUpdate]="false"
             [key]="property.key"
             [value]="property.value">
           </bt-property-value>
         </ul>
-      </section-content>
+      </div>
     </accordion>
 
-    <accordion [sectionTitle]='"Providers"'
-      *ngIf="node && node.providers && node.providers.length > 0">
-      <section-content>
+    <accordion sectionTitle="Providers" *ngIf="hasProviders" [defaultExpanded]="true">
+      <div section-content>
         <span *ngFor="let provider of node.providers">
-          <p class="m1 bold">{{provider.key}}</p>
-          <bt-property-value 
+          <p class="m1 bold legible-color">{{provider.key}}</p>
+          <bt-property-value
             *ngFor="let property of provider.value"
-            [checkUpdate]="true"
             [key]="property.key"
             [value]="property.value">
           </bt-property-value>
         </span>
-      </section-content>
+      </div>
     </accordion>
 
-    <accordion [sectionTitle]='"Directives"'
-      *ngIf="node && node.directives && node.directives.length > 0">
-      <section-content>
+    <accordion sectionTitle="Directives" *ngIf="hasDirectives">
+      <div section-content>
         <ul class="list-reset m0">
           <li *ngFor="let directive of node.directives">
             <span class="inline-block info-key">
@@ -56,80 +58,40 @@
               </span>
           </li>
         </ul>
-      </section-content>
+      </div>
     </accordion>
 
-    <accordion [sectionTitle]='"Change Detection"'
-      *ngIf="node && node.changeDetection">
-      <section-content>
-        <span class="node-item-property">{{node.changeDetection}}</span>
-      </section-content>
-    </accordion>
-
-    <accordion [sectionTitle]='"Input"'
-      *ngIf="node && node.input && node.input.length > 0">
-      <section-content>
-        <ul class="list-reset m0">
-          <li *ngFor="let input of _input">
-            <span class="info-key inline-block">
-              {{input.key}}:
-            </span>
-            <span class="info-value inline-block"
-              *ngIf="input.value !== ''">
-              {{input.value}}
-            </span>
-          </li>
-        </ul>
-      </section-content>
-    </accordion>
-
-    <accordion [sectionTitle]='"Output"'
-      *ngIf="node && node.output && node.output.length > 0">
-      <section-content>
-        <ul class="list-reset m0">
-          <li *ngFor="let output of node.output; ">
-            <span class="info-key inline-block">
-              {{output}}
-              <input class="info-editable"
-                type="text"
-                #prop>
-              <button class="btn btn-primary bg-olive mb1"
-                (click)="fireEvent(output, prop.value)">
-                Fire
-              </button>
-            </span>
-          </li>
-        </ul>
-      </section-content>
-    </accordion>
-
-    <accordion [sectionTitle]='"State"'
-      *ngIf="node && node.state">
-      <section-content>
+    <accordion sectionTitle="State" *ngIf="hasState" [defaultExpanded]="hasState">
+      <div section-content>
         <div class="mxn4">
-          <bt-render-state [propertyTree]="propertyTree"
-            [id]="node.id"
-            [state]="node.state">
-            </bt-render-state>
-        </div>
-      </section-content>
-    </accordion>
-
-    <accordion [sectionTitle]='"Dependencies"'
-      *ngIf="node && node.dependencies && node.dependencies.length > 0">
-      <section-content>
-        <bt-dependency [dependencies]="node.dependencies"></bt-dependency>
-      </section-content>
-    </accordion>
-
-    <accordion [sectionTitle]='"Children"'
-      *ngIf="node && node.children && node.children.length > 0">
-      <section-content>
-        <div id="tree-children"
-          class="h4">
+          <div [ngSwitch]="loadingState">
+            <template [ngSwitchCase]="ComponentLoadState.Received">
+              <bt-render-state
+                 [id]="node.id"
+                 [inputs]="inputs"
+                 [outputs]="outputs"
+                 [metadata]="metadata"
+                 [level]="0"
+                 [path]="path"
+                 [state]="state">
+              </bt-render-state>
+            </template>
+            <template [ngSwitchCase]="ComponentLoadState.Failed">
+              Failed to load component state
+            </template>
           </div>
-      </section-content>
+        </div>
+      </div>
     </accordion>
 
+    <accordion sectionTitle="Dependencies" *ngIf="hasDependencies">
+      <div section-content>
+        <bt-dependency
+          [tree]="tree"
+          [selectedNode]="node"
+          (selectNode)="selectNode.emit($event)">
+        </bt-dependency>
+      </div>
+    </accordion>
   </div>
 </div>

@@ -1,49 +1,71 @@
-import {Component} from '@angular/core';
-import {FORM_DIRECTIVES, NgForm, NgIf} from '@angular/common';
+import {
+  Component,
+  Input,
+} from '@angular/core';
 
-// StressComponent wraps a list item around an Angular 2 component
-// for Augury to detect.
-@Component({
-  selector: 'stress-item',
-  inputs: ['value'],
-  template: `
-    <li>{{value}}</li>
-  `
-})
-class StressItem {
-}
+import {
+  FormControl,
+  FormGroup,
+} from '@angular/forms';
 
-//
 @Component({
-  selector: 'stress-tester',
-  directives: [FORM_DIRECTIVES, NgForm, StressItem],
+  selector: 'stress-rec-item',
   template: `
-    <p>Stress test Augury by adding values to the list. 
-     Warning: may crash Augury and/or Chrome.</p>
-    <form #regForm="ngForm" (ngSubmit)="onSubmit(regForm)" novalidate>
-      <div>
-        <label for="node-count">Specify number of values: </label>
-        <input type="number" id="node-count" ngControl="count">
-      </div>
-      <button type="submit">Add</button>
-    </form>
-    <br>
-    <h4>List of values</h4>
-    <ul>
-      <stress-item *ngFor="let val of values" value="{{val}}"></stress-item>
-      <li *ngIf="values.length === 0">Hint: type a number and click Add above.</li>
+    <ul *ngFor="let each of tree">
+        <li *ngIf="each.length > 0">
+            <stress-rec-item [tree]="each"></stress-rec-item>
+        </li>
     </ul>
   `
 })
-export default class StressTester {
-  values: any = [];
+export class StressRecItem {
+  @Input() tree: Array<any>;
+}
 
-  // onSubmit make an array of the specified count. Each element will result in
-  // a new Angular 2 component.
-  onSubmit(regForm: NgForm) {
-    let maxCount = regForm.value.count;
-    for (let i = 0; i < maxCount; i++) {
-      this.values.push(i);
+@Component({
+  selector: 'stress-tester',
+  template: `
+  <div>
+    <p>Deep Tree Test</p>
+    <form (submit)="onSubmit()" novalidate>
+      <div>
+        <label>Branching factor of tree:
+          <input type="number" id="branching-factor" [formControl]="branchingFactor">
+        </label>
+        <label>Branching depth of tree:
+          <input type="number" [formControl]="depth">
+        </label>
+      </div>
+      <button type="submit">Run</button>
+    </form>
+    <br>
+    <div *ngIf="tree" style="display: none;">
+      <stress-rec-item [tree]="tree"></stress-rec-item>
+    </div>
+  </div>
+  `
+})
+export class StressTester {
+  private branchingFactor: FormControl = new FormControl();
+  private depth: FormControl = new FormControl();
+
+  private tree: Array<any>;
+
+  private onSubmit() {
+    const branchingFactor = this.branchingFactor.value;
+    const depth = this.depth.value;
+
+    let accum = [];
+    let i = depth;
+    while (i--) {
+      const innerAccum = [];
+
+      let j = branchingFactor;
+      while (j--) {
+        innerAccum.push([...accum]);
+      }
+      accum = innerAccum;
     }
+    this.tree = accum;
   }
 }

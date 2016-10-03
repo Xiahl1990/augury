@@ -1,139 +1,112 @@
 import {Injectable} from '@angular/core';
-import {Dispatcher} from '../../dispatcher/dispatcher';
-import {UserActionType} from '../action-constants';
-import {BackendMessagingService} from '../../channel/backend-messaging-service';
+
+import {Connection} from '../../channel/connection';
+import {MessageFactory} from '../../../communication';
+import {Route} from '../../../backend/utils';
+import {
+  matchNode,
+  matchRoute,
+  matchString,
+} from '../../utils';
+import {
+  ExpandState,
+  ComponentViewState,
+} from '../../state';
+import {
+  MutableTree,
+  Node,
+  Path,
+} from '../../../tree';
 
 @Injectable()
-/**
- * User Actions
- */
 export class UserActions {
-
   constructor(
-    private dispatcher: Dispatcher,
-    private messagingService: BackendMessagingService
-  ) { }
+    private connection: Connection,
+    private viewState: ComponentViewState
+  ) {}
 
-  /**
-   * Get the component tree data from back-end
-   */
-  startComponentTreeInspection() {
-    this.messagingService.sendMessageToBackend({
-      actionType: UserActionType.START_COMPONENT_TREE_INSPECTION
+  /// Toggle the expansion state of a node
+  toggle(node: Node, defaultState: ExpandState) {
+    let state = this.viewState.expandState(node);
+    if (state == null) {
+      state = defaultState;
+    }
+
+    switch (state) {
+      case ExpandState.Collapsed:
+        this.viewState.expandState(node, ExpandState.Expanded);
+        break;
+      case ExpandState.Expanded:
+      default:
+        this.viewState.expandState(node, ExpandState.Collapsed);
+        break;
+    }
+  }
+
+  /// Update a property inside of the component tree
+  updateProperty(path: Path, newValue) {
+    return this.connection.send(MessageFactory.updateProperty(path, newValue));
+  }
+
+  /// Emit a new value through an EventEmitter object
+  emitValue(path: Path, value?) {
+    return this.connection.send(MessageFactory.emitValue(path, value));
+  }
+
+  /// Search components and return result as nodes
+  searchComponents(tree: MutableTree, query: string): Promise<Array<Node>> {
+    return new Promise((resolve, reject) => {
+      const results = tree.filter(node => matchNode(node, query));
+      if (results.length > 0) {
+        resolve(results);
+      }
+      else {
+        reject(new Error('No results found'));
+      }
     });
   }
 
-  /**
-   * Select a node to be highlighted
-   * @param  {Object} options.node
-   */
-  selectNode({ node }) {
-    this.dispatcher.messageBus.next({
-      actionType: UserActionType.SELECT_NODE,
-      node
-    });
+  /// Search routers and return result as routes
+  searchRouter(routerTree: Array<Route>, query: string): Promise<Array<Route>> {
+    return new Promise((resolve, reject) => {
+      const recurse = (node: Route, fn: (route: Route) => void) => {
+        fn(node);
 
-    this.messagingService.sendMessageToBackend({
-      actionType: UserActionType.SELECT_NODE,
-      node
+        if (node.children) {
+          node.children.forEach(child => recurse(child, fn));
+        }
+      };
+
+      const matches = new Array<Route>();
+
+      routerTree.forEach(
+        root => recurse(root,
+          node => {
+            if (matchString(query, node.name) ||
+                matchString(query, node.path)) {
+              matches.push(node);
+            }
+          }));
+
+      if (matches.length > 0) {
+        resolve(matches);
+      }
+      else {
+        reject(new Error('No matching routes were found'));
+      }
     });
   }
 
-  /**
-   * Search for a node to be highlighted
-   * @param  {String} options.query
-   */
-  searchNode({ query, index }) {
-
-    this.dispatcher.messageBus.next({
-      actionType: UserActionType.SEARCH_NODE,
-      query,
-      index
-    });
-  }
-
-  /**
-   * Clear the highlight from the web page
-   */
   clearHighlight() {
-    this.messagingService.sendMessageToBackend({
-      actionType: UserActionType.CLEAR_HIGHLIGHT
-    });
+    return this.connection.send(MessageFactory.highlight([]));
   }
 
-  /**
-   * Highlight the element on web page
-   * @param  {Node} current element node
-   */
-  highlight({node}) {
-    this.messagingService.sendMessageToBackend({
-      actionType: UserActionType.HIGHLIGHT_NODE,
-      node
-    });
+  highlight(node: Node) {
+    return this.connection.send(MessageFactory.highlight([node]));
   }
 
-  /**
-   * On clicking expand and collapse of Component store the values in store
-   * @param  {Object} options.node
-   */
-  openCloseNode({node}) {
-    this.dispatcher.messageBus.next({
-      actionType: UserActionType.OPEN_CLOSE_TREE,
-      node
-    });
+  renderRouterTree(): Promise<Route[]> {
+    return this.connection.send<Route[], any>(MessageFactory.routerTree());
   }
-
-  /**
-   * Update the node state after re rendering the tree.
-   * Select the previously selected node and
-   * Preserve state of previously Closed Component.
-   * @param  {Object} options.closedNodes list of closed Nodes id's
-   * @param  {Object} options.selectedNode currently selectedNode
-   */
-  updateNodeState({closedNodes, selectedNode}) {
-    this.dispatcher.messageBus.next({
-      actionType: UserActionType.UPDATE_NODE_STATE,
-      closedNodes,
-      selectedNode
-    });
-  }
-
-  /**
-   * Get the list of dependent Components when clicking on dependency
-   * @param  {String} dependency Name of the dependency
-   */
-  getDependencies(dependency: string) {
-    this.dispatcher.messageBus.next({
-      actionType: UserActionType.GET_DEPENDENCIES,
-      dependency
-    });
-  }
-
-  /**
-   * Update the Component property when updating from info panel
-   * @param  {Object} options.property
-   */
-  updateProperty({property}) {
-    this.messagingService.sendMessageToBackend({
-      actionType: UserActionType.UPDATE_PROPERTY,
-      property
-    });
-  }
-
-  /**
-   * Dispatch the event to render router tree
-   */
-  renderRouterTree() {
-    this.messagingService.sendMessageToBackend({
-      actionType: UserActionType.RENDER_ROUTER_TREE
-    });
-  }
-
-  fireEvent(data: any) {
-    this.messagingService.sendMessageToBackend({
-      actionType: UserActionType.FIRE_EVENT,
-      data
-    });
-  }
-
 }
+

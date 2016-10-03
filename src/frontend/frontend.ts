@@ -1,184 +1,383 @@
-import {Component, Inject, bind, NgZone} from '@angular/core';
+import {
+  ChangeDetectorRef,
+  Component,
+  NgModule,
+  NgZone,
+  enableProdMode,
+} from '@angular/core';
 
-import {bootstrap} from '@angular/platform-browser-dynamic';
+import {
+  Connection,
+  DirectConnection,
+} from './channel';
 
-import {Dispatcher} from './dispatcher/dispatcher';
+import {
+  ApplicationError,
+  ApplicationErrorType,
+  Message,
+  MessageFactory,
+  MessageResponse,
+  MessageType,
+  Subscription,
+} from '../communication';
 
-import {BackendActions} from './actions/backend-actions/backend-actions';
+import {
+  ComponentInstanceState,
+  ExpandState,
+  Options,
+  Tab,
+  Theme,
+  ComponentViewState,
+  ComponentPropertyState,
+} from './state';
+
+import {
+  Change,
+  MutableTree,
+  Node,
+  Path,
+  deserializeChangePath,
+  serializePath,
+} from '../tree';
+
+import {createTree} from '../tree/mutable-tree-factory';
+
+import {BrowserModule} from '@angular/platform-browser';
+import {CommonModule} from '@angular/common';
+import {FormsModule} from '@angular/forms';
+import {platformBrowserDynamic} from '@angular/platform-browser-dynamic';
+
 import {UserActions} from './actions/user-actions/user-actions';
-
-import {UserActionType}
-  from './actions/action-constants';
-
-import {ComponentDataStore}
-  from './stores/component-data/component-data-store';
-
-import {BackendMessagingService} from './channel/backend-messaging-service';
-
-import {TreeView} from './components/tree-view/tree-view';
+import {RenderError} from './components/render-error/render-error';
 import {InfoPanel} from './components/info-panel/info-panel';
-import AppTrees from './components/app-trees/app-trees';
-import {Header} from './components/header/header';
-
-import * as Rx from 'rxjs';
-
 import {ParseUtils} from './utils/parse-utils';
+import {Route} from '../backend/utils';
+import {Accordion} from './components/accordion/accordion';
+import {AppTrees} from './components/app-trees/app-trees';
+import {ComponentInfo} from './components/component-info/component-info';
+import {ComponentTree} from './components/component-tree/component-tree';
+import {Dependency} from './components/dependency/dependency';
+import {InjectorTree} from './components/injector-tree/injector-tree';
+import {NodeAttributes} from './components/node-item/node-attributes';
+import {NodeItem} from './components/node-item/node-item';
+import {NodeOpenTag} from './components/node-item/node-open-tag';
+import {PropertyEditor} from './components/property-editor/property-editor';
+import {PropertyValue} from './components/property-value/property-value';
+import {RenderState} from './components/render-state/render-state';
+import {RouterInfo} from './components/router-info/router-info';
+import {RouterTree} from './components/router-tree/router-tree';
+import {Search} from './components/search/search';
+import {SplitPane} from './components/split-pane/split-pane';
+import {StateValues} from './components/state-values/state-values';
+import {TabMenu} from './components/tab-menu/tab-menu';
+import {TreeView} from './components/tree-view/tree-view';
 
-const BASE_STYLES = require('!style!css!postcss!../styles/app.css');
+require('!style!css!postcss!../styles/app.css');
 
 @Component({
   selector: 'bt-app',
   providers: [ParseUtils],
-  directives: [TreeView, InfoPanel, AppTrees, Header],
-  template: `
-    <div class="clearfix vh-100 overflow-hidden flex flex-column"
-      [ngClass]="{'dark': theme === 'dark'}">
-      <augury-header
-        [searchDisabled]="searchDisabled"
-        [theme]="theme"
-        (newTheme)="themeChanged($event)">
-      </augury-header>
-      <div class="flex flex-auto">
-        <div class="col col-6 overflow-hidden
-          border-right border-color-dark flex"
-        [ngClass]="{'overflow-scroll col-12': selectedTabIndex > 0}">
-          <bt-app-trees
-            class="flex flex-column flex-auto bg-white"
-            [selectedTabIndex]="selectedTabIndex"
-            [selectedNode]="selectedNode"
-            [closedNodes]="closedNodes"
-            [routerTree]="routerTree"
-            [tree]="tree"
-            [theme]="theme"
-            [changedNodes]="changedNodes"
-            (tabChange)="tabChange($event)">
-          </bt-app-trees>
-        </div>
-        <div class="col col-6 overflow-hidden"
-          [ngClass]="{'flex': selectedTabIndex === 0}"
-          [hidden]="selectedTabIndex > 0">
-          <bt-info-panel
-            class="flex flex-column flex-auto bg-white"
-            [tree]="tree"
-            [theme]="theme"
-            [node]="selectedNode">
-          </bt-info-panel>
-        </div>
-      </div>
-    </div>`
+  template: require('./frontend.html'),
+  styles: [require('to-string!./frontend.css')],
 })
-/**
- * Augury App
- */
 class App {
+  private Tab = Tab;
+  private Theme = Theme;
 
-  private tree: any;
-  private previousTree: any;
-  private routerTree: any;
-  private selectedTabIndex = 0;
-  private selectedNode: any;
-  private closedNodes: Array<any> = [];
-  private changedNodes: any = [];
-  private searchDisabled: boolean = false;
-  private theme: string;
+  private componentState: ComponentInstanceState;
+  private routerTree: Array<Route>;
+  private selectedNode: Node;
+  private selectedTab: Tab = Tab.ComponentTree;
+  private subscription: Subscription;
+  private theme: Theme;
+  private tree: MutableTree;
+  private error: ApplicationError;
 
   constructor(
-    private backendAction: BackendActions,
+    private changeDetector: ChangeDetectorRef,
+    private connection: Connection,
+    private directConnection: DirectConnection,
+    private options: Options,
     private userActions: UserActions,
-    private componentDataStore: ComponentDataStore,
-    private _ngZone: NgZone,
-    private parseUtils: ParseUtils
+    private viewState: ComponentViewState,
+    private zone: NgZone
   ) {
-    chrome.storage.sync.get('theme', (result: any) => {
-      if (result.theme === 'dark') {
-        this.theme = result.theme;
-      } else {
-        this.theme = 'light'; // default theme
-      }
-    });
+    this.componentState = new ComponentInstanceState(changeDetector);
 
-    this.userActions.startComponentTreeInspection();
+    this.options.changes.subscribe(() => this.requestTree());
 
-    // Listen for changes in selected node
-    this.componentDataStore.dataStream
-      .filter((data: any) => data.action &&
-              data.action === UserActionType.START_COMPONENT_TREE_INSPECTION)
-      .subscribe(data => {
-        if (!this.tree) {
-          this.tree = data.componentData;
-        } else {
-          this.previousTree = this.tree;
-          this.tree = data.componentData;
-          this.changedNodes =
-            parseUtils.getChangedNodes(this.previousTree, this.tree);
-        }
-        if (data.selectedNode) {
-          const treeMap = this.parseUtils.getNodesMap(this.tree);
-          const treeMapNode = treeMap[data.selectedNode.id];
-          this.selectedNode = treeMapNode ? JSON.parse(treeMapNode) : undefined;
-        }
-        this.closedNodes = data.closedNodes;
-        this._ngZone.run(() => undefined);
-      }
-    );
+    this.options.load().then(() => this.changeDetector.detectChanges());
 
-    this.componentDataStore.dataStream
-      .filter((data: any) => data.action &&
-              data.action === UserActionType.RENDER_ROUTER_TREE)
-      .subscribe(data => {
-        this.routerTree = data.tree.tree;
-        this._ngZone.run(() => undefined);
-      }
-    );
+    this.viewState.changes.subscribe(() => this.changeDetector.detectChanges());
+  }
 
-    this.componentDataStore.dataStream
-      .debounce(() => Rx.Observable.timer(250))
-      .filter((data: any) => {
-        return (data.action &&
-          data.action !== UserActionType.GET_DEPENDENCIES &&
-          data.action !== UserActionType.RENDER_ROUTER_TREE &&
-          data.action !== UserActionType.START_COMPONENT_TREE_INSPECTION &&
-          data.action !== UserActionType.CLEAR_TREE);
-      })
-      .subscribe(({ selectedNode }) => {
-        this.selectedNode = selectedNode;
-        this._ngZone.run(() => undefined);
-      });
+  private hasContent() {
+    return this.tree &&
+           this.tree.roots &&
+           this.tree.roots.length > 0;
+  }
 
-    this.componentDataStore.dataStream
-      .filter((data: any) => {
-        return (data.action &&
-          data.action === UserActionType.CLEAR_TREE);
-      })
-      .subscribe(() => {
-        this.tree = [];
-        this.previousTree = [];
-        this.selectedNode = undefined;
-        this._ngZone.run(() => undefined);
+  private ngDoCheck() {
+    this.selectedNode = this.viewState.selectedTreeNode(this.tree);
+  }
+
+  private ngOnInit() {
+    this.subscription = this.connection.subscribe(this.onReceiveMessage.bind(this));
+
+    this.connection.reconnect().then(() => this.requestTree());
+  }
+
+  private ngOnDestroy() {
+    if (this.subscription) {
+      this.subscription.unsubscribe();
+    }
+
+    this.connection.close();
+  }
+
+  private requestTree() {
+    const options = this.options.simpleOptions();
+
+    this.connection.send(MessageFactory.initialize(options))
+      .catch(error => {
+        this.error = new ApplicationError(
+          ApplicationErrorType.UncaughtException,
+          error.message,
+          error.stack);
+
+        this.changeDetector.detectChanges();
       });
   }
 
-  tabChange(index: number) {
-    this.selectedTabIndex = index;
-    if (index === 1) {
-      this.userActions.renderRouterTree();
-      this.searchDisabled = true;
-    } else {
-      this.searchDisabled = false;
+  private restoreSelection() {
+    this.selectedNode = this.viewState.selectedTreeNode(this.tree);
+
+    this.onSelectNode(this.selectedNode, () => this.componentState.reset());
+  }
+
+  private processMessage(msg: Message<any>,
+      sendResponse: (response: MessageResponse<any>) => void) {
+    const respond = () => {
+      sendResponse(MessageFactory.response(msg, {processed: true}, false));
+    };
+
+    switch (msg.messageType) {
+      case MessageType.Push:
+        this.directConnection.readQueue(
+          (innerMessage, innerRespond) => this.processMessage(innerMessage, innerRespond));
+        break;
+      case MessageType.CompleteTree:
+        this.createTree(msg.content);
+        respond();
+        break;
+      case MessageType.TreeDiff:
+        if (this.tree == null) {
+          this.connection.send(MessageFactory.initialize(this.options.simpleOptions())); // request tree
+        }
+        else {
+          this.updateTree(msg.content);
+        }
+        respond();
+        break;
+      case MessageType.RouterTree: // TODO(cbond): support router tree diff
+        this.routerTree = msg.content;
+        respond();
+        break;
+      case MessageType.ApplicationError:
+        this.error = msg.content;
+        respond();
+        break;
     }
   }
 
-  themeChanged(newTheme: string): void {
-    this.theme = newTheme;
-    // Set the new theme
-    chrome.storage.sync.set({ theme: newTheme });
+  private createTree(roots: Array<Node>) {
+    this.componentState.reset();
+
+    this.tree = createTree(roots);
+
+    this.restoreSelection();
+  }
+
+  private updateTree(changes) {
+    /// Patch the treee
+    this.tree.patch(changes);
+
+    /// This operation must happen after the tree patch
+    const changedIdentifiers = this.extractIdentifiersFromChanges(changes);
+
+    /// Highlight the nodes that have changed
+    this.viewState.nodesChanged(changedIdentifiers);
+
+    this.restoreSelection();
+  }
+
+  private onReceiveMessage(msg: Message<any>,
+      sendResponse: (response: MessageResponse<any>) => void) {
+    const process = () => {
+      try {
+        this.processMessage(msg, sendResponse);
+      }
+      catch (error) {
+        this.error = new ApplicationError(
+          ApplicationErrorType.UncaughtException,
+          error.message,
+          error.stack);
+      }
+    };
+
+    this.zone.run(() => process());
+  }
+
+  private onSelectNode(node: Node, beforeLoad?: () => void) {
+    this.selectedNode = node;
+
+    if (node == null) {
+      this.viewState.unselect();
+      return;
+    }
+
+    this.viewState.select(node);
+
+    const m = MessageFactory.selectComponent(node, node.isComponent);
+
+    if (node.isComponent) {
+
+      const promise = this.directConnection.handleImmediate(m)
+        .then(response => {
+          if (typeof beforeLoad === 'function') {
+            beforeLoad();
+          }
+          return response;
+        });
+
+      this.componentState.wait(node, promise);
+    }
+    else {
+      this.componentState.wait(node, this.directConnection.handleImmediate(m).then(() => null));
+    }
+  }
+
+  private onInspectElement(node: Node) {
+    chrome.devtools.inspectedWindow.eval(`inspect(inspectedApplication.nodeFromPath('${node.id}'))`);
+  }
+
+  private onCollapseChildren(node: Node) {
+    this.recursiveExpansionState(node, ExpandState.Collapsed);
+  }
+
+  private onExpandChildren(node: Node) {
+    this.recursiveExpansionState(node, ExpandState.Expanded);
+  }
+
+  private onSelectedTabChange(tab: Tab) {
+    this.selectedTab = tab;
+
+    if (tab === Tab.RouterTree) {
+      this.userActions.renderRouterTree()
+        .then(response => {
+          this.zone.run(() => {
+            this.routerTree = response;
+          });
+        })
+        .catch(error => {
+          this.error = new ApplicationError(
+            ApplicationErrorType.UncaughtException,
+            error.message,
+            error.stack);
+          this.changeDetector.detectChanges();
+        });
+    }
+  }
+
+  private extractIdentifiersFromChanges(changes: Array<Change>): string[] {
+    const identifiers = new Set<string>();
+
+    for (const change of changes) {
+      const path = this.nodePathFromChangePath(deserializeChangePath(change.path));
+
+      identifiers.add(serializePath(path));
+    }
+
+    const results = new Array<string>();
+
+    identifiers.forEach(id => results.push(id));
+
+    return results;
+  }
+
+  private nodePathFromChangePath(changePath: Path) {
+    const result = new Array<string | number>();
+
+    for (let index = 0; index < changePath.length; ++index) {
+      switch (changePath[index]) {
+        case 'roots':
+        case 'children':
+          result.push(changePath[++index]);
+          break;
+      }
+    }
+
+    return result;
+  }
+
+  private recursiveExpansionState(from: Node, state: ExpandState) {
+    const apply = (node: Node) => {
+      this.viewState.expandState(node, state);
+
+      node.children.forEach(n => apply(n));
+    };
+
+    apply(from);
   }
 }
 
-bootstrap(App, [
-  BackendActions,
-  UserActions,
-  Dispatcher,
-  ComponentDataStore,
-  BackendMessagingService
-]);
+const declarations = [
+  Accordion,
+  App,
+  AppTrees,
+  ComponentInfo,
+  ComponentTree,
+  Dependency,
+  InfoPanel,
+  InjectorTree,
+  NodeAttributes,
+  NodeItem,
+  NodeOpenTag,
+  PropertyEditor,
+  PropertyValue,
+  RenderState,
+  RouterInfo,
+  RouterTree,
+  Search,
+  SplitPane,
+  StateValues,
+  TabMenu,
+  TreeView,
+  RenderError,
+];
+
+@NgModule({
+  declarations,
+  imports: [
+    BrowserModule,
+    CommonModule,
+    FormsModule,
+  ],
+  providers: [
+    Connection,
+    DirectConnection,
+    Options,
+    UserActions,
+    ComponentViewState,
+    ComponentPropertyState,
+  ],
+  bootstrap: [App]
+})
+class FrontendModule {}
+
+declare const PRODUCTION: boolean;
+if (PRODUCTION) {
+  enableProdMode();
+}
+
+platformBrowserDynamic().bootstrapModule(FrontendModule);

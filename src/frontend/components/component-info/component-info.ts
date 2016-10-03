@@ -1,111 +1,110 @@
-declare var JSONFormatter: any;
-import {Component, ElementRef, Inject, EventEmitter,
-  OnChanges}
-  from '@angular/core';
+import {
+  Component,
+  EventEmitter,
+  Input,
+  Output,
+} from '@angular/core';
 
+import {ComponentLoadState} from '../../state';
+import {InputOutput} from '../../../frontend/utils';
 import {UserActions} from '../../actions/user-actions/user-actions';
 
-import Accordion from '../accordion/accordion';
-import ParseData from '../../utils/parse-data';
-import RenderState from '../render-state/render-state';
-import Dependency from '../dependency/dependency';
-
-import PropertyValue from '../property-value/property-value';
+import {
+  Metadata,
+  MutableTree,
+  Node,
+  Path,
+  deserializePath,
+} from '../../../tree';
 
 @Component({
   selector: 'bt-component-info',
-  templateUrl: '/src/frontend/components/component-info/component-info.html',
-  inputs: ['node'],
-  directives: [RenderState, Accordion, Dependency, PropertyValue]
+  template: require('./component-info.html'),
 })
-export default class ComponentInfo {
-  private node: any;
-  private propertyTree: string = '';
-  private _input: Array<any>;
+export class ComponentInfo {
+  @Input() node: Node;
+  @Input() tree: MutableTree;
+  @Input() state;
+  @Input() metadata: Metadata;
+  @Input() loadingState: ComponentLoadState;
 
-  constructor(
-    @Inject(ElementRef) private elementRef: ElementRef,
-    private userActions: UserActions
-  ) { }
+  @Output() private selectNode = new EventEmitter<Node>();
 
-  ngOnChanges(change: any) {
-    if (this.node) {
-      this.normalizeInput();
-      setTimeout(() => this.displayTree());
-    }
+  private ComponentLoadState = ComponentLoadState;
+
+  path: Path;
+
+  inputs: InputOutput;
+  outputs: InputOutput;
+
+  ngOnInit() {
+    this.ngOnChanges();
   }
 
-  viewComponentSource($event) {
-    const highlightStr = '[augury-id=\"' + this.node.id + '\"]';
+  ngOnChanges() {
+    if (this.node) {
+      this.path = deserializePath(this.node.id);
 
-    let evalStr = `inspect(ng.probe(document.querySelector('${highlightStr}'))
-    .componentInstance.constructor)`;
+      const listenerNames = {};
+      for (const listener of this.node.listeners) {
+        listenerNames[listener.name] = 1;
+      }
 
-    chrome.devtools.inspectedWindow.eval(
-      evalStr,
-      function(result, isException) {
-        if (isException) {
-          console.log(isException);
+      this.inputs = {};
+      this.outputs = {};
+      for (const input of this.node.input) {
+        const [name, alias] = input.split(/:/);
+        if (listenerNames[name]) {
+          this.outputs[name] = {alias};
+        } else {
+          this.inputs[name] = {alias};
         }
       }
-    );
-
-    $event.preventDefault();
-    $event.stopPropagation();
-  }
-
-  normalizeInput(): void {
-    this._input = [];
-    if (this.node.input) {
-      this.node.input.forEach(elem => {
-        let [key, value] = elem.split(':');
-        this._input.push({
-          key: key,
-          value: (value ? value.trim() : '')
-        });
-      });
     }
   }
 
-  isJson(data: string): boolean {
-    let isJson: boolean = false;
-    if (data.indexOf('{') !== 0) {
-      isJson = false;
-    } else {
-      try {
-        JSON.parse(data);
-        isJson = true;
-      } catch (ex) {
-        console.log(ex);
-      }
-    }
-    return isJson;
-  }
-
-  fireEvent(output: string, param: any) {
-    if (this.isJson(param)) {
-      param = JSON.parse(param);
+  private get hasState() {
+    if (this.node == null || this.state == null) {
+      return false;
     }
 
-    this.userActions.fireEvent({
-      'output': output,
-      'data': param,
-      'id': this.node.id
-    });
+    return Object.keys(this.state).length > 0;
   }
 
-  displayTree(): void {
-    const childrenContainer = this
-      .elementRef.nativeElement
-      .querySelector('#tree-children');
-
-    if (childrenContainer && this.node.children) {
-      while (childrenContainer.firstChild) {
-        childrenContainer.removeChild(childrenContainer.firstChild);
-      }
-      const formatter2 = new JSONFormatter(this.node.children);
-      childrenContainer.appendChild(formatter2.render());
-    }
+  private get hasProviders() {
+    return this.node &&
+      this.node.providers &&
+      this.node.providers.length > 0;
   }
 
+  private get hasDirectives() {
+    return this.node &&
+      this.node.directives &&
+      this.node.directives.length > 0;
+  }
+
+  private get hasDependencies() {
+    return this.node &&
+      this.node.dependencies &&
+      this.node.dependencies.length > 0;
+  }
+
+  private get hasProperties() {
+    return this.node &&
+      this.node.description &&
+      this.node.description.length > 0;
+  }
+
+  private viewComponentSource() {
+    chrome.devtools.inspectedWindow.eval(`
+      var root = ng.probe(inspectedApplication.nodeFromPath('${this.node.id}'));
+      if (root) {
+        if (root.componentInstance) {
+          inspect(root.componentInstance.constructor);
+        }
+        else {
+          throw new Error('This component has no instance and therefore no constructor');
+        }
+      }`);
+  }
 }

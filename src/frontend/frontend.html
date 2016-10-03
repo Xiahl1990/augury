@@ -1,0 +1,24 @@
+<div *ngIf="hasContent"
+  class="clearfix vh-100 overflow-hidden flex flex-column"
+  [ngClass]="options.theme === Theme.Dark ? 'dark' : 'light'">
+  <template [ngIf]="error">
+    <render-error [error]="error"></render-error>
+  </template>
+  <bt-app-trees #trees *ngIf="error == null"
+    class="flex flex-column flex-auto"
+    [componentState]="componentState"
+    [selectedTab]="selectedTab"
+    [selectedNode]="selectedNode"
+    [routerTree]="routerTree"
+    [options]="options"
+    [tree]="tree"
+    (tabChange)="onSelectedTabChange($event)"
+    (selectNode)="onSelectNode($event)"
+    (inspectElement)="onInspectElement($event)"
+    (collapseChildren)="onCollapseChildren($event)"
+    (expandChildren)="onExpandChildren($event)">
+  </bt-app-trees>
+</div>
+<template [ngIf]="!hasContent">
+  No components were found on the page
+</template>
